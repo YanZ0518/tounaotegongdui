@@ -1,10 +1,10 @@
 "use client"
 
 import type React from "react"
+
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { ArrowLeft, Send } from "lucide-react"
-import { ChatMessage } from '@/lib/api'
 
 type Character = "joy" | "anger" | "sadness"
 
@@ -24,7 +24,7 @@ const characters: CharacterData[] = [
     id: "anger",
     name: "Anger",
     image: "/images/anger.png",
-    avatarImage: "/images/anger-avatar-new.png",
+    avatarImage: "/images/anger-avatar-new.png", // Updated to use new image
     glowColor: "rgba(239, 68, 68, 0.6)",
     shadowColor: "rgba(239, 68, 68, 0.5)",
     themeColor: "rgb(239, 68, 68)",
@@ -52,12 +52,18 @@ const characters: CharacterData[] = [
   },
 ]
 
+interface Message {
+  id: string
+  text: string
+  sender: "user" | "character"
+  timestamp: Date
+}
+
 export default function ChatbotSelection() {
   const [selectedCharacter, setSelectedCharacter] = useState<Character>("joy")
   const [isChatOpen, setIsChatOpen] = useState(false)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
   const [inputMessage, setInputMessage] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
 
   const selectedData = characters.find((char) => char.id === selectedCharacter)
 
@@ -72,23 +78,26 @@ export default function ChatbotSelection() {
     }
     setMessages([
       {
-        role: "assistant",
-        content: greetings[character],
+        id: Date.now().toString(),
+        text: greetings[character],
+        sender: "character",
+        timestamp: new Date(),
       },
     ])
   }
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim()) return
+    if (!inputMessage.trim()) return;
 
-    const userMessage: ChatMessage = {
-      role: "user",
-      content: inputMessage,
-    }
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      text: inputMessage,
+      sender: "user",
+      timestamp: new Date(),
+    };
 
-    setMessages((prev) => [...prev, userMessage])
-    setInputMessage("")
-    setIsLoading(true)
+    setMessages((prev) => [...prev, newMessage]);
+    setInputMessage("");
 
     try {
       const response = await fetch('/api/chat', {
@@ -97,39 +106,48 @@ export default function ChatbotSelection() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: [...messages, userMessage],
-          temperature: 0.7,
-          max_tokens: 1000,
+          messages: [
+            {
+              role: 'system',
+              content: `You are a ${selectedCharacter} character. Respond accordingly.`
+            },
+            {
+              role: 'user',
+              content: inputMessage
+            }
+          ],
         }),
-      })
+      });
 
-      const text = await response.text()
-      // 强制打印到文件，防止终端折叠
-      require('fs').writeFileSync('silu_api_error.html', text, { flag: 'a' })
-      console.error('Silu API Error 原始响应:', text) // 依然保留
       if (!response.ok) {
-        throw new Error(`Silu API Error: ${response.status} ${response.statusText}\n${text}`)
+        throw new Error('Failed to get response');
       }
-      const data = JSON.parse(text)
-      if (!data.choices || !data.choices[0]?.message) {
-        throw new Error('Silu API 响应格式无效: ' + text)
-      }
-      const assistantMessage: ChatMessage = data.choices[0].message
-      setMessages((prev) => [...prev, assistantMessage])
-    } catch (error) {
-      console.error('Error:', error)
-      // Add error message to chat
+
+      const data = await response.json();
+      const aiResponse = data.choices[0].message.content;
+
       setMessages((prev) => [
         ...prev,
         {
-          role: "assistant",
-          content: "抱歉，我遇到了一些问题。请稍后再试。",
+          id: (Date.now() + 1).toString(),
+          text: aiResponse,
+          sender: "character",
+          timestamp: new Date(),
         },
-      ])
-    } finally {
-      setIsLoading(false)
+      ]);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          text: "Sorry, I encountered an error. Please try again.",
+          sender: "character",
+          timestamp: new Date(),
+        },
+      ]);
     }
-  }
+  };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -326,12 +344,12 @@ export default function ChatbotSelection() {
 
               {/* Messages Area */}
               <div className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
-                {messages.map((message, index) => (
+                {messages.map((message) => (
                   <div
-                    key={index}
-                    className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                    key={message.id}
+                    className={`flex gap-3 ${message.sender === "user" ? "justify-end" : "justify-start"}`}
                   >
-                    {message.role === "assistant" && (
+                    {message.sender === "character" && (
                       <div className="relative flex-shrink-0">
                         <div
                           className={`w-8 h-8 rounded-full flex items-center justify-center overflow-hidden ${
@@ -360,18 +378,15 @@ export default function ChatbotSelection() {
 
                     <div
                       className={`max-w-xs lg:max-w-md px-4 py-2 rounded-2xl ${
-                        message.role === "user" ? "bg-white/20 text-white ml-auto" : "bg-white/10 text-white"
+                        message.sender === "user" ? "bg-white/20 text-white ml-auto" : "bg-white/10 text-white"
                       }`}
                     >
-                      <p className="text-sm">{message.content}</p>
+                      <p className="text-sm">{message.text}</p>
                     </div>
 
-                    {message.role === "user" && <div className="w-8 h-8 rounded-full bg-gray-400/50 flex-shrink-0" />}
+                    {message.sender === "user" && <div className="w-8 h-8 rounded-full bg-gray-400/50 flex-shrink-0" />}
                   </div>
                 ))}
-                {isLoading && (
-                  <div className="text-center text-white/60">AI 正在思考...</div>
-                )}
               </div>
 
               {/* Message Input */}
@@ -384,12 +399,10 @@ export default function ChatbotSelection() {
                     onKeyPress={handleKeyPress}
                     placeholder="Type your message..."
                     className="flex-1 bg-white/10 border border-white/20 rounded-full px-4 py-3 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30"
-                    disabled={isLoading}
                   />
                   <button
                     onClick={handleSendMessage}
-                    disabled={isLoading}
-                    className="p-3 rounded-full transition-all duration-200 hover:scale-105 disabled:opacity-50"
+                    className="p-3 rounded-full transition-all duration-200 hover:scale-105"
                     style={{
                       backgroundColor: selectedData.themeColor,
                       boxShadow: `0 4px 15px ${selectedData.shadowColor}`,
